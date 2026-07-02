@@ -46,6 +46,13 @@ export async function createCharacter(data) {
   return res.json()
 }
 
+export async function explore(characterId) {
+  const res = await apiFetch(`/characters/${characterId}/explore/`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error ?? 'Ошибка исследования')
+  return data
+}
+
 export async function spawnMonster(characterId, monsterId) {
   const res = await apiFetch(`/characters/${characterId}/spawn_monster/`, {
     method: 'POST',

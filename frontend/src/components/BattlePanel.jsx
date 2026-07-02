@@ -1,44 +1,43 @@
-import { useState, useEffect } from 'react'
-import { fetchMonsters } from '../api/monsters'
-import { spawnMonster, attackMonster, fetchCharacter } from '../api/characters'
+import { useRef, useState } from 'react'
+import { attackMonster, explore, fetchCharacter } from '../api/characters'
 
 export default function BattlePanel({ character, sceneRef, onCharacterUpdate }) {
-  const [monsters, setMonsters] = useState([])
-  const [encounters, setEncounters] = useState([])   // {encounterId, monster, monsterHp}
+  const [encounters, setEncounters] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [log, setLog] = useState([])
   const [attacking, setAttacking] = useState(false)
-  const [spawning, setSpawning] = useState(null)
-
-  useEffect(() => {
-    fetchMonsters().then(setMonsters).catch(() => {})
-  }, [])
+  const [exploring, setExploring] = useState(false)
+  const logId = useRef(0)
 
   function addLog(msg, type = 'info') {
-    setLog(prev => [{ msg, type, id: Date.now() + Math.random() }, ...prev].slice(0, 30))
+    setLog(prev => [{ msg, type, id: ++logId.current }, ...prev].slice(0, 40))
   }
 
-  async function handleSpawn(monster) {
-    if (encounters.length >= 3) {
-      addLog('Нельзя — уже 3 активных боя', 'error')
-      return
-    }
-    setSpawning(monster.id)
+  // ── Explore ──
+  async function handleExplore() {
+    if (encounters.length >= 3) { addLog('Нельзя — уже 3 активных боя', 'error'); return }
+    setExploring(true)
     try {
-      const data = await spawnMonster(character.id, monster.id)
-      const enc = {
-        encounterId: data.encounter_id,
-        monster,
-        monsterHp: data.monster_health,
+      const data = await explore(character.id)
+      if (!data.encounter) {
+        addLog(`🌿 ${data.message}`, 'info')
+        return
       }
+      const monster = {
+        name: data.monster_name,
+        health: data.monster_health,
+        is_boss: data.is_boss,
+        level: '?',
+      }
+      const enc = { encounterId: data.encounter_id, monster, monsterHp: data.monster_health }
       setEncounters(prev => [...prev, enc])
       setActiveId(enc.encounterId)
       sceneRef.current?.spawnMonster(monster, data.monster_health)
-      addLog(`${monster.name} появился! HP: ${data.monster_health}`, 'spawn')
+      addLog(`${data.is_boss ? '👹 БОСС' : '👾'} ${data.monster_name} вышел из тени!`, 'spawn')
     } catch (err) {
       addLog(err.message, 'error')
     } finally {
-      setSpawning(null)
+      setExploring(false)
     }
   }
 
@@ -47,6 +46,7 @@ export default function BattlePanel({ character, sceneRef, onCharacterUpdate }) 
     sceneRef.current?.spawnMonster(enc.monster, enc.monsterHp)
   }
 
+  // ── Attack ──
   async function handleAttack() {
     const enc = encounters.find(e => e.encounterId === activeId)
     if (!enc || attacking) return
@@ -60,24 +60,19 @@ export default function BattlePanel({ character, sceneRef, onCharacterUpdate }) 
       if (data.monster_defeated) {
         setTimeout(() => sceneRef.current?.playDefeat(), 300)
         addLog(`💀 ${enc.monster.name} повержен!`, 'victory')
-
         if (data.loot?.length) {
           data.loot.forEach(l => addLog(`🎁 Получено: ${l.item} x${l.quantity}`, 'loot'))
         }
-
         setEncounters(prev => prev.filter(e => e.encounterId !== activeId))
         setActiveId(null)
-
         const updated = await fetchCharacter()
         if (updated) onCharacterUpdate(updated)
       } else {
-        // Монстр контратакует
         if (data.damage_taken != null) {
           addLog(`🩸 ${enc.monster.name} наносит ${data.damage_taken} урона. Ваше HP: ${data.character_health}`, 'taken')
           sceneRef.current?.playMonsterAttack(data.damage_taken, data.character_health)
           onCharacterUpdate(prev => ({ ...prev, health: data.character_health }))
         }
-
         if (data.character_defeated) {
           addLog('💀 Вы пали в бою...', 'defeat')
           sceneRef.current?.playCharacterDefeat()
@@ -87,9 +82,7 @@ export default function BattlePanel({ character, sceneRef, onCharacterUpdate }) 
           if (updated) onCharacterUpdate(updated)
         } else {
           setEncounters(prev =>
-            prev.map(e =>
-              e.encounterId === activeId ? { ...e, monsterHp: data.monster_health } : e
-            )
+            prev.map(e => e.encounterId === activeId ? { ...e, monsterHp: data.monster_health } : e)
           )
         }
       }
@@ -101,32 +94,23 @@ export default function BattlePanel({ character, sceneRef, onCharacterUpdate }) 
   }
 
   const activeEnc = encounters.find(e => e.encounterId === activeId)
+  const canFight = encounters.length < 3
 
   return (
     <div className="battle-panel">
 
-      {/* Monster list */}
+      {/* Explore */}
       <div className="bp-section">
-        <h3 className="bp-title">Монстры</h3>
-        <div className="monster-list">
-          {monsters.length === 0 && <p className="bp-empty">Загрузка...</p>}
-          {monsters.map(m => (
-            <button
-              key={m.id}
-              className={`monster-card ${m.is_boss ? 'boss' : ''}`}
-              onClick={() => handleSpawn(m)}
-              disabled={spawning === m.id || encounters.length >= 3}
-            >
-              <span className="mc-icon">{m.is_boss ? '👹' : '👾'}</span>
-              <div className="mc-info">
-                <span className="mc-name">{m.name}</span>
-                <span className="mc-stats">Ур.{m.level} · HP {m.health}</span>
-              </div>
-              <span className="mc-xp">+{m.experience_reward} XP</span>
-              {spawning === m.id && <span className="spinner-sm" />}
-            </button>
-          ))}
-        </div>
+        <p className="explore-desc">
+          Отправьтесь в путь — с шансом 70% вы встретите монстра, подходящего вашему уровню.
+        </p>
+        <button
+          className="explore-btn"
+          onClick={handleExplore}
+          disabled={exploring || !canFight}
+        >
+          {exploring ? <span className="spinner" /> : '🌿 Исследовать'}
+        </button>
       </div>
 
       {/* Active encounters */}
@@ -148,7 +132,7 @@ export default function BattlePanel({ character, sceneRef, onCharacterUpdate }) 
         </div>
       )}
 
-      {/* Attack button */}
+      {/* Attack */}
       <button
         className="attack-btn"
         onClick={handleAttack}
@@ -156,21 +140,17 @@ export default function BattlePanel({ character, sceneRef, onCharacterUpdate }) 
       >
         {attacking
           ? <span className="spinner" />
-          : activeEnc
-            ? `⚔ Атаковать ${activeEnc.monster.name}`
-            : 'Выберите бой'}
+          : activeEnc ? `⚔ Атаковать ${activeEnc.monster.name}` : 'Выберите бой'}
       </button>
 
-      {/* Battle log */}
+      {/* Log */}
       <div className="bp-section bp-log-wrap">
-        <h3 className="bp-title">Лог боя</h3>
+        <h3 className="bp-title">Лог</h3>
         <div className="battle-log">
           {log.length === 0
             ? <p className="bp-empty">Здесь будет история боя...</p>
             : log.map(entry => (
-              <div key={entry.id} className={`log-entry log-${entry.type}`}>
-                {entry.msg}
-              </div>
+              <div key={entry.id} className={`log-entry log-${entry.type}`}>{entry.msg}</div>
             ))
           }
         </div>

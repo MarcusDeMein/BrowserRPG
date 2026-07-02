@@ -23,9 +23,10 @@ export default function GameCanvas({ sceneRef, character }) {
     })
 
     gameRef.current.events.once('ready', () => {
-      const scene = gameRef.current.scene.getScene('BattleScene')
-      sceneRef.current = scene
-      if (character) scene.setCharacter(character)
+      const scene = gameRef.current.scene.scenes[0]
+      if (!scene) return
+      const init = () => { sceneRef.current = scene; if (character) scene.setCharacter(character) }
+      scene.sys.isActive() ? init() : scene.events.once('create', init)
     })
 
     return () => {

@@ -22,6 +22,9 @@ class Character(models.Model):
     mana = models.IntegerField(default=50)
     stamina = models.IntegerField(default=50)
 
+    def get_max_health(self):
+        return 100 + (self.level - 1) * 10
+
     def get_required_exp(self, level):
         base_slope = 100
 

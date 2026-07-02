@@ -39,7 +39,7 @@ class CharacterSerializer(serializers.ModelSerializer):
         ]
 
     def get_max_health(self, obj):
-        return 100 + (obj.level - 1) * 10
+        return obj.get_max_health()
 
     def get_attack_power(self, obj):
         return obj.get_attack_power()

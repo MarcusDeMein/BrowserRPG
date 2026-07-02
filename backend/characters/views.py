@@ -1,3 +1,5 @@
+import random
+
 from rest_framework import  viewsets
 from .models import Character, Item, InventoryItem, Monster
 from .serializers import CharacterSerializer, InventoryItemSerializer, ItemSerializer, MonsterSerializer
@@ -17,6 +19,46 @@ class CharacterViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+    
+    @action(detail=True, methods=["post"])
+    def explore(self, request, pk=None):
+        character = self.get_object()
+
+        active_count = MonsterInstance.objects.filter(
+            character=character,
+            is_defeated=False
+        ).count()
+
+        if active_count >= 3:
+            return Response(
+                {"error": "Слишком много активных боёв"},
+                status=400
+            )
+
+        encounter_chance = 0.7
+        if random.random() > encounter_chance:
+            return Response({"encounter": False, "message": "Ты ничего не встретил"})
+
+        available_monsters = Monster.objects.filter(level__lte=character.level + 2)
+        monster = random.choice(list(available_monsters)) if available_monsters.exists() else None
+
+        if monster is None:
+            return Response({"encounter": False, "message": "Подходящих монстров не найдено"})
+
+        instance = MonsterInstance.objects.create(
+            monster=monster,
+            character=character,
+            current_health=monster.health
+        )
+
+        return Response({
+            "encounter": True,
+            "encounter_id": instance.id,
+            "monster_name": monster.name,
+            "monster_health": instance.current_health,
+            "is_boss": monster.is_boss,
+        })
+
 
     @action(detail=True, methods=["post"])
     def spawn_monster(self, request, pk=None):
@@ -88,8 +130,10 @@ class CharacterViewSet(viewsets.ModelViewSet):
             response_data["character_health"] = attacker.health
 
             if attacker.health <= 0:
-                attacker.health = 0
+                attacker.health = attacker.get_max_health()
+                encounter.is_defeated = True
                 response_data["character_defeated"] = True
+                response_data["monster_defeated"] = True
                 # TODO: решить, что происходит при поражении — respawn, штраф опыта, и т.д.
 
             attacker.save()
